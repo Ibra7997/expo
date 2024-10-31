@@ -10,6 +10,8 @@
 
 ### 💡 Others
 
+- Catch `EMFILE` errors on MacOS and clarify the next step.
+
 ## 0.19.13 — 2024-10-31
 
 _This version does not introduce any user-facing changes._
