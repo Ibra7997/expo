@@ -10,6 +10,8 @@
 
 ### 💡 Others
 
+- `process.env.EXPO_DOM_BASE_URL` can now be used inside DOM Components and native. ([#32502](https://github.com/expo/expo/pull/32502) by [@kudo](https://github.com/kudo))
+
 ## 52.0.0-preview.13 — 2024-10-31
 
 ### 🎉 New features
