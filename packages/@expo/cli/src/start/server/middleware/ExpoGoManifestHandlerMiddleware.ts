@@ -6,7 +6,7 @@ import FormData from 'form-data';
 import { serializeDictionary, Dictionary } from 'structured-headers';
 
 import { ManifestMiddleware, ManifestRequestInfo } from './ManifestMiddleware';
-import { assertRuntimePlatform, parsePlatformHeader } from './resolvePlatform';
+import { RuntimePlatform, assertRuntimePlatform, parsePlatformHeader } from './resolvePlatform';
 import { ServerHeaders, ServerRequest } from './server.types';
 import { getAnonymousIdAsync } from '../../../api/user/UserSettings';
 import { ANONYMOUS_USERNAME } from '../../../api/user/user';
@@ -15,7 +15,12 @@ import {
   getCodeSigningInfoAsync,
   signManifestString,
 } from '../../../utils/codesigning';
+import { env } from '../../../utils/env';
 import { CommandError } from '../../../utils/errors';
+import {
+  ExpoUpdatesCLIModuleNotFoundError,
+  expoUpdatesCommandAsync,
+} from '../../../utils/expoUpdatesCli';
 import { stripPort } from '../../../utils/url';
 
 const debug = require('debug')('expo:start:server:middleware:ExpoGoManifestHandlerMiddleware');
@@ -94,6 +99,33 @@ export class ExpoGoManifestHandlerMiddleware extends ManifestMiddleware<ExpoGoMa
     return headers;
   }
 
+  private async resolveRuntimeVersionWithExpoUpdatesAsync(
+    platform: RuntimePlatform
+  ): Promise<string | null> {
+    try {
+      debug('Using expo-updates runtimeversion:resolve CLI for runtime version resolution');
+      const extraArgs = env.EXPO_DEBUG ? ['--debug'] : [];
+      const resolvedRuntimeVersionJSONResult = await expoUpdatesCommandAsync(this.projectRoot, [
+        'runtimeversion:resolve',
+        '--platform',
+        platform,
+        ...extraArgs,
+      ]);
+      const runtimeVersionResult: { runtimeVersion: string | null } = JSON.parse(
+        resolvedRuntimeVersionJSONResult
+      );
+      debug('runtimeversion:resolve output:');
+      debug(resolvedRuntimeVersionJSONResult);
+
+      return runtimeVersionResult.runtimeVersion ?? null;
+    } catch (e: any) {
+      if (e instanceof ExpoUpdatesCLIModuleNotFoundError) {
+        return null;
+      }
+      throw e;
+    }
+  }
+
   public async _getManifestResponseAsync(requestOptions: ExpoGoManifestRequestInfo): Promise<{
     body: string;
     version: string;
@@ -102,11 +134,16 @@ export class ExpoGoManifestHandlerMiddleware extends ManifestMiddleware<ExpoGoMa
     const { exp, hostUri, expoGoConfig, bundleUrl } =
       await this._resolveProjectSettingsAsync(requestOptions);
 
-    const runtimeVersion = await Updates.getRuntimeVersionAsync(
-      this.projectRoot,
-      { ...exp, runtimeVersion: exp.runtimeVersion ?? { policy: 'sdkVersion' } },
-      requestOptions.platform
-    );
+    const runtimeVersion =
+      (await this.resolveRuntimeVersionWithExpoUpdatesAsync(requestOptions.platform)) ??
+      // if expo-updates can't determine runtime version, fall back to calculation from config-plugin.
+      // this happens when expo-updates is installed but runtimeVersion hasn't yet been configured or when
+      // expo-updates is not installed.
+      (await Updates.getRuntimeVersionAsync(
+        this.projectRoot,
+        { ...exp, runtimeVersion: exp.runtimeVersion ?? { policy: 'sdkVersion' } },
+        requestOptions.platform
+      ));
     if (!runtimeVersion) {
       throw new CommandError(
         'MANIFEST_MIDDLEWARE',
